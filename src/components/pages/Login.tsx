@@ -10,9 +10,8 @@ import {
   UserCheck,
   UserPlus,
   AlertTriangle,
-  Info,
-  CheckCircle2,
-  RefreshCw
+  KeyRound,
+  CheckCircle2
 } from 'lucide-react';
 
 export const Login: React.FC = () => {
@@ -20,17 +19,18 @@ export const Login: React.FC = () => {
     loginWithGoogle,
     loginWithEmail,
     signupWithEmail,
-    continueAsGuest,
+    resetPassword,
+    startDemoMode,
     authError,
     setAuthError,
-    firebaseUser,
   } = useApp();
 
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
+  const [mode, setMode] = useState<'signin' | 'signup' | 'forgot'>('signin');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
 
   const handleGoogleClick = async () => {
     setIsSubmitting(true);
@@ -41,11 +41,22 @@ export const Login: React.FC = () => {
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setAuthError(null);
+
+    if (mode === 'forgot') {
+      if (!email) return;
+      setIsSubmitting(true);
+      const res = await resetPassword(email);
+      setIsSubmitting(false);
+      if (res.success) {
+        setResetSent(true);
+      }
+      return;
+    }
+
     if (!email || !password) return;
 
     setIsSubmitting(true);
-    setAuthError(null);
-
     if (mode === 'signup') {
       await signupWithEmail(email, password, name);
     } else {
@@ -54,25 +65,39 @@ export const Login: React.FC = () => {
     setIsSubmitting(false);
   };
 
+  const handleTryDemo = async () => {
+    setIsSubmitting(true);
+    await startDemoMode();
+    setIsSubmitting(false);
+  };
+
   return (
-    <div className="min-h-[85vh] flex items-center justify-center p-4">
-      <div className="w-full max-w-md space-y-5">
+    <div className="min-h-screen flex items-center justify-center p-4 bg-slate-50">
+      <div className="w-full max-w-md space-y-6">
         {/* Brand Banner */}
-        <div className="text-center space-y-2">
+        <div className="text-center space-y-2.5">
           <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-indigo-600 text-white shadow-md shadow-indigo-200 mb-1">
             <Compass className="w-7 h-7" />
           </div>
-          <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
-            SkillPath
-          </h1>
-          <p className="text-xs sm:text-sm text-slate-500 font-medium">
-            Evidence-driven placement preparation platform bridging the gap between claimed & demonstrated skills.
+          <div className="flex items-center justify-center gap-2">
+            <h1 className="text-2xl font-black text-slate-900 tracking-tight">
+              SkillPath
+            </h1>
+            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-700">
+              Placement Platform
+            </span>
+          </div>
+          <h2 className="text-lg sm:text-xl font-bold text-slate-800 tracking-tight">
+            Build skills that match your career goals.
+          </h2>
+          <p className="text-xs sm:text-sm text-slate-500 font-medium max-w-sm mx-auto leading-relaxed">
+            Assess what you actually know, find your skill gaps, learn what matters, and prepare for your target role.
           </p>
         </div>
 
         {/* Auth Error Banner if configuration or sign-in fails */}
         {authError && (
-          <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-xs space-y-2 animate-in fade-in duration-200">
+          <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-xs space-y-1.5 animate-in fade-in duration-200">
             <div className="flex items-start gap-2">
               <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
               <div>
@@ -82,15 +107,30 @@ export const Login: React.FC = () => {
             </div>
             {authError.includes('Firebase Console') && (
               <div className="mt-2 pt-2 border-t border-rose-200/60 text-[11px] text-rose-700">
-                Tip: You can use Email/Password sign-in below, or continue exploring the benchmark profile.
+                Tip: You can use Email/Password sign-in below, or try Demo mode.
               </div>
             )}
           </div>
         )}
 
+        {/* Password Reset Sent Confirmation */}
+        {resetSent && mode === 'forgot' && (
+          <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs space-y-1.5 animate-in fade-in duration-200">
+            <div className="flex items-start gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold block">Reset Email Sent</span>
+                <p className="mt-0.5 leading-relaxed text-emerald-800">
+                  We've sent password reset instructions to <strong>{email}</strong>. Check your inbox and follow the link.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Main Card */}
         <div className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-7 shadow-sm space-y-5">
-          {/* PRIMARY METHOD: Continue with Google */}
+          {/* PRIMARY METHOD: CONTINUE WITH GOOGLE */}
           <div>
             <button
               type="button"
@@ -116,56 +156,78 @@ export const Login: React.FC = () => {
                   d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
                 />
               </svg>
-              <span>{isSubmitting ? 'Authenticating...' : 'Continue with Google'}</span>
+              <span>{isSubmitting ? 'Authenticating...' : 'CONTINUE WITH GOOGLE'}</span>
             </button>
 
             <div className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-slate-400">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Firebase OAuth • Preserves progress across sessions</span>
+              <span>Firebase OAuth • Persistent sessions across devices</span>
             </div>
           </div>
 
           <div className="relative flex py-1 items-center">
             <div className="flex-grow border-t border-slate-200" />
             <span className="flex-shrink mx-3 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
-              Or with Email & Password
+              EMAIL / PASSWORD
             </span>
             <div className="flex-grow border-t border-slate-200" />
           </div>
 
           {/* Mode Switcher */}
-          <div className="grid grid-cols-2 gap-1 bg-slate-100 p-1 rounded-xl text-xs font-bold text-center">
-            <button
-              type="button"
-              onClick={() => {
-                setMode('signin');
-                setAuthError(null);
-              }}
-              className={`py-1.5 rounded-lg transition-all ${
-                mode === 'signin'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Sign In
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setMode('signup');
-                setAuthError(null);
-              }}
-              className={`py-1.5 rounded-lg transition-all ${
-                mode === 'signup'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Create Account
-            </button>
-          </div>
+          {mode !== 'forgot' ? (
+            <div className="grid grid-cols-2 gap-1 bg-slate-100 p-1 rounded-xl text-xs font-bold text-center">
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('signin');
+                  setAuthError(null);
+                  setResetSent(false);
+                }}
+                className={`py-1.5 rounded-lg transition-all ${
+                  mode === 'signin'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                Sign In
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('signup');
+                  setAuthError(null);
+                  setResetSent(false);
+                }}
+                className={`py-1.5 rounded-lg transition-all ${
+                  mode === 'signup'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                Create Account
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                <KeyRound className="w-4 h-4 text-indigo-600" />
+                <span>Forgot Password</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('signin');
+                  setAuthError(null);
+                  setResetSent(false);
+                }}
+                className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold"
+              >
+                Back to Sign In
+              </button>
+            </div>
+          )}
 
-          {/* Email / Password Form */}
+          {/* Form */}
           <form onSubmit={handleFormSubmit} className="space-y-3.5">
             {mode === 'signup' && (
               <div>
@@ -199,21 +261,38 @@ export const Login: React.FC = () => {
               />
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1 flex items-center gap-1.5">
-                <Lock className="w-3.5 h-3.5 text-slate-400" />
-                <span>Password</span>
-              </label>
-              <input
-                type="password"
-                required
-                minLength={6}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••••••"
-                className="w-full text-xs sm:text-sm px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
+            {mode !== 'forgot' && (
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                    <Lock className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Password</span>
+                  </label>
+                  {mode === 'signin' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMode('forgot');
+                        setAuthError(null);
+                        setResetSent(false);
+                      }}
+                      className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800"
+                    >
+                      Forgot Password?
+                    </button>
+                  )}
+                </div>
+                <input
+                  type="password"
+                  required
+                  minLength={6}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••••••"
+                  className="w-full text-xs sm:text-sm px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+            )}
 
             <button
               type="submit"
@@ -225,25 +304,28 @@ export const Login: React.FC = () => {
                 {isSubmitting
                   ? 'Processing...'
                   : mode === 'signup'
-                  ? 'Create Candidate Account'
+                  ? 'Create Account'
+                  : mode === 'forgot'
+                  ? 'Send Password Reset Email'
                   : 'Sign In to SkillPath'}
               </span>
             </button>
           </form>
 
-          {/* Guest / Benchmark Option */}
-          <div className="pt-2 border-t border-slate-100">
+          {/* Separate clearly labeled option: Try Demo */}
+          <div className="pt-3 border-t border-slate-100">
             <button
               type="button"
-              onClick={continueAsGuest}
+              onClick={handleTryDemo}
+              disabled={isSubmitting}
               className="w-full py-2.5 px-3 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 font-semibold text-xs transition-colors flex items-center justify-center gap-2"
             >
               <Zap className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Explore Benchmark Profile (Alex Morgan)</span>
+              <span>Try Demo</span>
               <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
             </button>
-            <p className="text-[10px] text-center text-slate-400 mt-1.5">
-              Guest candidates can link Google at any time to permanently save progress.
+            <p className="text-[10px] text-center text-slate-400 mt-1.5 leading-tight">
+              Explore SkillPath with sample candidate data (Software Engineer benchmark profile) without signing in.
             </p>
           </div>
         </div>

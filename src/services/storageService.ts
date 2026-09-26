@@ -25,13 +25,14 @@ function setLocal<T>(key: string, value: T): void {
 export class StorageService {
   // 1. User Profile
   static async getUserProfile(uid: string): Promise<UserProfile> {
+    const isDemo = uid === 'demo-student-user';
     const defaultProfile: UserProfile = {
       uid,
-      displayName: 'Alex Morgan',
-      email: 'alex.morgan@sampletech.edu',
-      targetRole: 'Software Engineer',
-      targetCompany: 'Sample Technologies',
-      onboardingComplete: true,
+      displayName: isDemo ? 'Alex Morgan' : 'Candidate',
+      email: isDemo ? 'alex.morgan@sampletech.edu' : '',
+      targetRole: isDemo ? 'Software Engineer' : '',
+      targetCompany: isDemo ? 'Sample Technologies' : '',
+      onboardingComplete: isDemo,
       createdAt: new Date().toISOString()
     };
 
@@ -227,7 +228,13 @@ export class StorageService {
 
   static async createOrUpdateUserProfile(
     uid: string,
-    authUser: { displayName?: string | null; email?: string | null; photoURL?: string | null; isAnonymous?: boolean }
+    authUser: {
+      displayName?: string | null;
+      email?: string | null;
+      photoURL?: string | null;
+      isAnonymous?: boolean;
+      onboardingComplete?: boolean;
+    }
   ): Promise<UserProfile> {
     const existing = await this.getUserProfile(uid);
     const updated: UserProfile = {
@@ -239,6 +246,10 @@ export class StorageService {
       email: authUser.email || existing.email || '',
       photoURL: authUser.photoURL || existing.photoURL || '',
       isAnonymous: authUser.isAnonymous ?? false,
+      onboardingComplete:
+        authUser.onboardingComplete !== undefined
+          ? authUser.onboardingComplete
+          : existing.onboardingComplete ?? false,
       lastLoginAt: new Date().toISOString(),
       createdAt: existing.createdAt || new Date().toISOString(),
     };

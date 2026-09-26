@@ -22,11 +22,12 @@ export const Navbar: React.FC = () => {
     setCurrentPage,
     notification,
     firebaseUser,
+    isDemoMode,
     loginWithGoogle,
     logout,
   } = useApp();
 
-  const isGuestOrAnon = !firebaseUser || firebaseUser.isAnonymous;
+  const isGuestOrDemo = isDemoMode || !firebaseUser || firebaseUser.isAnonymous;
 
   return (
     <header className="sticky top-0 z-40 bg-white border-b border-slate-200">
@@ -74,8 +75,8 @@ export const Navbar: React.FC = () => {
 
         {/* Right Actions */}
         <div className="flex items-center gap-2.5">
-          {/* If Guest/Anonymous, offer 1-click Link Google */}
-          {isGuestOrAnon ? (
+          {/* If Guest/Demo, offer 1-click Link Google */}
+          {isGuestOrDemo ? (
             <button
               onClick={() => loginWithGoogle()}
               title="Save all your assessments and data permanently with Google"
@@ -99,7 +100,7 @@ export const Navbar: React.FC = () => {
                   d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
                 />
               </svg>
-              <span className="hidden sm:inline">Link Google</span>
+              <span className="hidden sm:inline">Save with Google</span>
             </button>
           ) : (
             <div className="hidden sm:flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
@@ -131,15 +132,15 @@ export const Navbar: React.FC = () => {
               />
             ) : (
               <div className="w-7 h-7 rounded-full bg-slate-900 text-white flex items-center justify-center text-xs font-bold">
-                {profile.displayName?.charAt(0) || profile.name?.charAt(0) || 'A'}
+                {profile.displayName?.charAt(0) || profile.name?.charAt(0) || (isDemoMode ? 'A' : 'C')}
               </div>
             )}
             <div className="hidden lg:block text-xs">
               <span className="font-semibold text-slate-800 block leading-tight max-w-[120px] truncate">
-                {profile.displayName || profile.name || 'Alex Morgan'}
+                {profile.displayName || profile.name || (isDemoMode ? 'Alex Morgan' : 'Candidate')}
               </span>
               <span className="text-[10px] text-slate-400 block leading-tight">
-                {isGuestOrAnon ? 'Guest' : 'Candidate'}
+                {isGuestOrDemo ? (isDemoMode ? 'Demo Mode' : 'Guest') : 'Candidate'}
               </span>
             </div>
           </button>

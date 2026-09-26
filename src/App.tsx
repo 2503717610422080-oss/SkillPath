@@ -24,24 +24,32 @@ import {
   Sparkles,
   Mic,
   FileText,
-  Loader2
+  Loader2,
+  Compass
 } from 'lucide-react';
 
 const MainContent: React.FC = () => {
-  const { currentPage, setCurrentPage, isLoading } = useApp();
+  const { currentPage, setCurrentPage, isAuthLoading, isAuthenticated } = useApp();
 
-  if (isLoading) {
+  if (isAuthLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <div className="text-center space-y-3">
-          <Loader2 className="w-8 h-8 text-indigo-600 animate-spin mx-auto" />
-          <p className="text-sm font-semibold text-slate-700">Loading SkillPath Evidence Profile...</p>
+        <div className="text-center space-y-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-indigo-600 flex items-center justify-center text-white mx-auto shadow-md shadow-indigo-200">
+            <Compass className="w-6 h-6 animate-spin" />
+          </div>
+          <div>
+            <h1 className="text-base font-bold text-slate-900">SkillPath</h1>
+            <p className="text-xs font-semibold text-slate-500 mt-0.5">Loading authentication...</p>
+          </div>
         </div>
       </div>
     );
   }
 
-  if (currentPage === 'login') {
+  // FIRST GATE: When user is NOT authenticated, show ONLY the Sign In page
+  // The Dashboard and all other application pages must NOT be accessible before authentication.
+  if (!isAuthenticated || currentPage === 'login') {
     return <Login />;
   }
 

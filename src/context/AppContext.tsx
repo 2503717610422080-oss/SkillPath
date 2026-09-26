@@ -20,6 +20,7 @@ import {
   signInWithCredential,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
   signInAnonymously,
   signOut,
   linkWithPopup,
@@ -49,6 +50,9 @@ interface AppContextType {
   setCurrentPage: (page: AppPage) => void;
   uid: string;
   firebaseUser: User | null;
+  isAuthenticated: boolean;
+  isDemoMode: boolean;
+  isAuthLoading: boolean;
   profile: UserProfile;
   setProfile: (p: UserProfile) => void;
   targetRole: TargetRoleProfile;
@@ -75,6 +79,8 @@ interface AppContextType {
   loginWithGoogle: () => Promise<{ success: boolean; error?: string }>;
   loginWithEmail: (email: string, pass: string) => Promise<{ success: boolean; error?: string }>;
   signupWithEmail: (email: string, pass: string, name?: string) => Promise<{ success: boolean; error?: string }>;
+  resetPassword: (email: string) => Promise<{ success: boolean; error?: string }>;
+  startDemoMode: () => Promise<void>;
   continueAsGuest: () => Promise<void>;
   logout: () => Promise<void>;
 
@@ -102,18 +108,20 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentPage, setCurrentPage] = useState<AppPage>('dashboard');
-  const [uid, setUid] = useState<string>('demo-student-user');
+  const [currentPage, setCurrentPage] = useState<AppPage>('login');
+  const [uid, setUid] = useState<string>('');
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
+  const [isDemoMode, setIsDemoMode] = useState<boolean>(false);
+  const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
   const [profile, setProfile] = useState<UserProfile>({
-    uid: 'demo-student-user',
-    displayName: 'Alex Morgan',
-    email: 'alex.morgan@sampletech.edu',
-    targetRole: 'Software Engineer',
-    targetCompany: 'Sample Technologies',
-    onboardingComplete: true,
+    uid: '',
+    displayName: '',
+    email: '',
+    targetRole: '',
+    targetCompany: '',
+    onboardingComplete: false,
     createdAt: new Date().toISOString()
   });
 
@@ -128,6 +136,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [selectedSkillForProof, setSelectedSkillForProof] = useState<{ skillName: string; topic?: string } | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [notification, setNotification] = useState<string | null>(null);
+
+  const isAuthenticated = Boolean(firebaseUser || isDemoMode);
 
   const showNotification = (msg: string) => {
     setNotification(msg);
@@ -164,9 +174,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Listen to persistent Firebase Auth state
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setIsLoading(true);
+      setIsAuthLoading(true);
       if (user) {
         setFirebaseUser(user);
+        setIsDemoMode(false);
         setUid(user.uid);
         try {
           await StorageService.createOrUpdateUserProfile(user.uid, {
@@ -175,17 +186,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             photoURL: user.photoURL,
             isAnonymous: user.isAnonymous,
           });
+          const userProf = await StorageService.getUserProfile(user.uid);
           await loadUserData(user.uid);
+          // If first-time user (onboarding incomplete), direct to onboarding; otherwise dashboard
+          if (!userProf.onboardingComplete) {
+            setCurrentPage('onboarding');
+          } else {
+            setCurrentPage('dashboard');
+          }
         } catch (e) {
           console.warn('Auth user setup warning:', e);
           await loadUserData(user.uid);
+          setCurrentPage('dashboard');
         }
       } else {
         setFirebaseUser(null);
-        // Default to demo/guest session so user can explore seamlessly
-        setUid('demo-student-user');
-        await loadUserData('demo-student-user');
+        // Do NOT automatically start demo mode or log in anonymously!
+        setIsDemoMode(false);
+        setUid('');
+        setCurrentPage('login');
       }
+      setIsAuthLoading(false);
       setIsLoading(false);
     });
 
@@ -197,7 +218,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setAuthError(null);
     const currentAnon = auth.currentUser;
     const isAnon = currentAnon && currentAnon.isAnonymous;
-    const prevUid = currentAnon ? currentAnon.uid : null;
+    const prevUid = currentAnon ? currentAnon.uid : (isDemoMode ? 'demo-student-user' : null);
 
     try {
       if (isAnon) {
@@ -206,14 +227,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const res = await linkWithPopup(currentAnon, googleProvider);
           if (res.user) {
             setFirebaseUser(res.user);
+            setIsDemoMode(false);
+            setUid(res.user.uid);
             await StorageService.createOrUpdateUserProfile(res.user.uid, {
               displayName: res.user.displayName,
               email: res.user.email,
               photoURL: res.user.photoURL,
               isAnonymous: false,
             });
-            showNotification(`Google account linked! All target role, assessment & skill data preserved for ${res.user.displayName || res.user.email}.`);
-            setCurrentPage('dashboard');
+            const p = await StorageService.getUserProfile(res.user.uid);
+            await loadUserData(res.user.uid);
+            showNotification(`Google account linked! Progress preserved for ${res.user.displayName || res.user.email}.`);
+            setCurrentPage(p.onboardingComplete ? 'dashboard' : 'onboarding');
             return { success: true };
           }
         } catch (linkErr: any) {
@@ -224,6 +249,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               const signInRes = await signInWithCredential(auth, cred);
               if (signInRes.user) {
                 setFirebaseUser(signInRes.user);
+                setIsDemoMode(false);
                 setUid(signInRes.user.uid);
                 if (prevUid) {
                   await StorageService.migrateUserData(prevUid, signInRes.user.uid);
@@ -234,9 +260,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                   photoURL: signInRes.user.photoURL,
                   isAnonymous: false,
                 });
+                const p = await StorageService.getUserProfile(signInRes.user.uid);
                 await loadUserData(signInRes.user.uid);
                 showNotification(`Signed in to Google account. Data synchronized successfully!`);
-                setCurrentPage('dashboard');
+                setCurrentPage(p.onboardingComplete ? 'dashboard' : 'onboarding');
                 return { success: true };
               }
             }
@@ -248,16 +275,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const res = await signInWithPopup(auth, googleProvider);
         if (res.user) {
           setFirebaseUser(res.user);
+          setIsDemoMode(false);
           setUid(res.user.uid);
+          if (isDemoMode && prevUid) {
+            await StorageService.migrateUserData(prevUid, res.user.uid);
+          }
           await StorageService.createOrUpdateUserProfile(res.user.uid, {
             displayName: res.user.displayName,
             email: res.user.email,
             photoURL: res.user.photoURL,
             isAnonymous: false,
           });
+          const p = await StorageService.getUserProfile(res.user.uid);
           await loadUserData(res.user.uid);
-          showNotification(`Welcome back, ${res.user.displayName || res.user.email}!`);
-          setCurrentPage('dashboard');
+          showNotification(`Welcome, ${res.user.displayName || res.user.email}!`);
+          setCurrentPage(p.onboardingComplete ? 'dashboard' : 'onboarding');
           return { success: true };
         }
       }
@@ -286,10 +318,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const cred = await signInWithEmailAndPassword(auth, email, pass);
       if (cred.user) {
         setFirebaseUser(cred.user);
+        setIsDemoMode(false);
         setUid(cred.user.uid);
+        const p = await StorageService.getUserProfile(cred.user.uid);
         await loadUserData(cred.user.uid);
         showNotification(`Signed in as ${cred.user.email}`);
-        setCurrentPage('dashboard');
+        setCurrentPage(p.onboardingComplete ? 'dashboard' : 'onboarding');
         return { success: true };
       }
       return { success: true };
@@ -317,7 +351,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     name?: string
   ): Promise<{ success: boolean; error?: string }> => {
     setAuthError(null);
-    const prevAnon = auth.currentUser?.isAnonymous ? auth.currentUser.uid : null;
+    const prevAnon = auth.currentUser?.isAnonymous ? auth.currentUser.uid : (isDemoMode ? 'demo-student-user' : null);
     try {
       const cred = await createUserWithEmailAndPassword(auth, email, pass);
       if (cred.user) {
@@ -335,12 +369,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           displayName: name || email.split('@')[0],
           email: cred.user.email,
           isAnonymous: false,
+          onboardingComplete: false,
         });
         setFirebaseUser(cred.user);
+        setIsDemoMode(false);
         setUid(cred.user.uid);
         await loadUserData(cred.user.uid);
-        showNotification(`Account created! Welcome, ${name || email}!`);
-        setCurrentPage('dashboard');
+        showNotification(`Account created! Welcome, ${name || email}! Let's set up your profile.`);
+        setCurrentPage('onboarding');
         return { success: true };
       }
       return { success: true };
@@ -357,22 +393,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // AUTH ACTION 4: Continue as Guest / Demo
-  const continueAsGuest = async () => {
+  // AUTH ACTION 4: Send Password Reset Email
+  const resetPassword = async (email: string): Promise<{ success: boolean; error?: string }> => {
+    setAuthError(null);
     try {
-      const cred = await signInAnonymously(auth);
-      if (cred.user) {
-        showNotification('Signed in as Guest candidate. You can link Google at any time to preserve progress.');
-        setCurrentPage('dashboard');
-        return;
+      await sendPasswordResetEmail(auth, email);
+      return { success: true };
+    } catch (err: any) {
+      console.error('Reset password error:', err);
+      let msg = err.message || 'Failed to send password reset email.';
+      if (err.code === 'auth/user-not-found') {
+        msg = 'No user registered with this email address.';
+      } else if (err.code === 'auth/invalid-email') {
+        msg = 'Invalid email address.';
       }
-    } catch (e) {
-      console.warn('Anonymous auth warning, continuing with demo profile:', e);
+      setAuthError(msg);
+      return { success: false, error: msg };
     }
-    setCurrentPage('dashboard');
   };
 
-  // AUTH ACTION 5: Logout
+  // AUTH ACTION 5: Explicit Demo Mode
+  const startDemoMode = async () => {
+    setIsDemoMode(true);
+    setUid('demo-student-user');
+    await loadUserData('demo-student-user');
+    setCurrentPage('dashboard');
+    showNotification('Entered Demo Mode as candidate Alex Morgan (Software Engineer benchmark).');
+  };
+
+  // Continue as Guest (triggers explicit demo mode)
+  const continueAsGuest = async () => {
+    await startDemoMode();
+  };
+
+  // AUTH ACTION 6: Logout
   const logout = async () => {
     try {
       await signOut(auth);
@@ -380,8 +434,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       console.warn('Signout warning:', e);
     }
     setFirebaseUser(null);
-    setUid('demo-student-user');
-    await loadUserData('demo-student-user');
+    setIsDemoMode(false);
+    setUid('');
     showNotification('Signed out successfully.');
     setCurrentPage('login');
   };
@@ -705,6 +759,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setCurrentPage,
         uid,
         firebaseUser,
+        isAuthenticated,
+        isDemoMode,
+        isAuthLoading,
         profile,
         setProfile,
         targetRole,
@@ -729,6 +786,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         loginWithGoogle,
         loginWithEmail,
         signupWithEmail,
+        resetPassword,
+        startDemoMode,
         continueAsGuest,
         logout,
         updateSelfClaimRatings,
