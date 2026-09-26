@@ -1,0 +1,8 @@
+{
+  "name": "SkillPath",
+  "description": "Evidence-driven placement preparation platform bridging the gap between self-claimed skills and demonstrated skills through verified baseline assessments, AI mock interviews, and adaptive learning.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

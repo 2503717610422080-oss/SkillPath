@@ -1,0 +1,134 @@
+{
+  "entities": {
+    "profiles": {
+      "title": "User Profile",
+      "description": "User profile with target role, company, and resume status",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "targetRoleId": { "type": "string" },
+        "targetRoleName": { "type": "string" },
+        "targetCompany": { "type": "string" },
+        "onboardingComplete": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid"]
+    },
+    "targetRoles": {
+      "title": "Target Role",
+      "description": "Extracted target role with job description and requirement groups",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "roleTitle": { "type": "string" },
+        "company": { "type": "string" },
+        "jobDescription": { "type": "string" },
+        "highSkills": { "type": "array" },
+        "mediumSkills": { "type": "array" },
+        "lowSkills": { "type": "array" },
+        "behavioralSkills": { "type": "array" },
+        "createdAt": { "type": "string" }
+      }
+    },
+    "userSkills": {
+      "title": "User Skill State",
+      "description": "Evidence scores and demonstrated levels for each user skill",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "skillName": { "type": "string" },
+        "category": { "type": "string" },
+        "selfClaimScore": { "type": "number" },
+        "assessmentScore": { "type": "number" },
+        "projectScore": { "type": "number" },
+        "interviewScore": { "type": "number" },
+        "demonstratedScore": { "type": "number" },
+        "confidenceScore": { "type": "number" },
+        "requiredLevel": { "type": "number" },
+        "importance": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["userId", "skillName"]
+    },
+    "assessments": {
+      "title": "Baseline or Skill Assessment",
+      "description": "Assessment session records",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "type": { "type": "string" },
+        "skillName": { "type": "string" },
+        "score": { "type": "number" },
+        "totalQuestions": { "type": "number" },
+        "answers": { "type": "array" },
+        "completedAt": { "type": "string" }
+      }
+    },
+    "learningPlans": {
+      "title": "Personalized Learning Plan",
+      "description": "Learning path generated from skill gaps and role requirements",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "targetRoleId": { "type": "string" },
+        "items": { "type": "array" },
+        "updatedAt": { "type": "string" }
+      }
+    },
+    "interviewSessions": {
+      "title": "Mock Interview Session",
+      "description": "AI Mock interview transcript and rubric evaluation",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "roleTitle": { "type": "string" },
+        "company": { "type": "string" },
+        "overallScore": { "type": "number" },
+        "technicalScore": { "type": "number" },
+        "problemSolvingScore": { "type": "number" },
+        "communicationScore": { "type": "number" },
+        "projectDepthScore": { "type": "number" },
+        "roleRelevanceScore": { "type": "number" },
+        "weakAreas": { "type": "array" },
+        "turns": { "type": "array" },
+        "completedAt": { "type": "string" }
+      }
+    },
+    "projects": {
+      "title": "Project Evidence",
+      "description": "User project submissions analyzed for skill evidence",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "githubUrl": { "type": "string" },
+        "description": { "type": "string" },
+        "detectedSkills": { "type": "array" },
+        "evidenceNotes": { "type": "string" },
+        "projectScore": { "type": "number" },
+        "createdAt": { "type": "string" }
+      }
+    },
+    "resumes": {
+      "title": "Resume Data",
+      "description": "User resume sections and role tailoring score",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "summary": { "type": "string" },
+        "education": { "type": "array" },
+        "experience": { "type": "array" },
+        "projects": { "type": "array" },
+        "skills": { "type": "array" },
+        "certifications": { "type": "array" },
+        "matchScore": { "type": "number" },
+        "missingKeywords": { "type": "array" },
+        "tailorSuggestions": { "type": "array" },
+        "updatedAt": { "type": "string" }
+      }
+    }
+  }
+}
