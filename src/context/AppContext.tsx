@@ -295,12 +295,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       return { success: true };
     } catch (err: any) {
-      console.error('Google Auth error:', err);
+      if (
+        err.code === 'auth/unauthorized-domain' ||
+        err.code === 'auth/popup-closed-by-user' ||
+        err.code === 'auth/popup-blocked'
+      ) {
+        console.warn('Google Auth notice:', err.code, err.message);
+      } else {
+        console.error('Google Auth error:', err);
+      }
       let friendlyError = err.message || 'Google sign-in failed.';
       if (err.code === 'auth/configuration-not-found' || err.code === 'auth/operation-not-allowed') {
         friendlyError = 'Google Sign-In is not enabled in Firebase Console. Please enable Google under Authentication > Sign-in method in Firebase Console.';
       } else if (err.code === 'auth/unauthorized-domain') {
-        friendlyError = `Domain unauthorized for OAuth: ${window.location.hostname}. Please add this domain to Authorized Domains in Firebase Authentication Settings.`;
+        const domain = window.location.hostname;
+        friendlyError = `Domain unauthorized for OAuth: ${domain}. Please add "${domain}" to Authorized Domains in Firebase Authentication Settings (Firebase Console > Authentication > Settings > Authorized domains).`;
       } else if (err.code === 'auth/popup-blocked') {
         friendlyError = 'Google sign-in popup was blocked by your browser. Please allow popups for this site.';
       } else if (err.code === 'auth/popup-closed-by-user') {

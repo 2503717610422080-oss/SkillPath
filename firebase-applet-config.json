@@ -1,12 +1,12 @@
 {
-  "projectId": "ferrous-medium-3wh4c",
-  "appId": "1:689052859779:web:cecc2eb404ce76719e4ab6",
-  "apiKey": "AIzaSyAUnd5EmK80UCQVD1wa0TpS7KB1ppi_2HI",
-  "authDomain": "ferrous-medium-3wh4c.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-9c661c70-738b-4b36-9897-1aa7df9c1990",
-  "storageBucket": "ferrous-medium-3wh4c.firebasestorage.app",
-  "messagingSenderId": "689052859779",
+  "projectId": "crackit-47144",
+  "appId": "1:602187380143:web:b72f588cf142022f002b5a",
+  "apiKey": "AIzaSyAPhV5A7Fk-7UJZMIUcZxnAIj5q31auPnA",
+  "authDomain": "crackit-47144.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "crackit-47144.firebasestorage.app",
+  "messagingSenderId": "602187380143",
   "measurementId": "",
-  "oAuthClientId": "689052859779-arvjhp9ob597hr5d6i4uhbmnc771n2hi.apps.googleusercontent.com",
+  "oAuthClientId": "",
   "recaptchaSiteKey": ""
 }

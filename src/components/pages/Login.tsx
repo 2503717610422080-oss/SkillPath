@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
+import { resolvedFirebaseConfig } from '../../firebase';
 import {
   Compass,
   ArrowRight,
@@ -11,7 +12,11 @@ import {
   UserPlus,
   AlertTriangle,
   KeyRound,
-  CheckCircle2
+  CheckCircle2,
+  ExternalLink,
+  Copy,
+  Check,
+  X
 } from 'lucide-react';
 
 export const Login: React.FC = () => {
@@ -31,6 +36,15 @@ export const Login: React.FC = () => {
   const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+  const [copiedDomain, setCopiedDomain] = useState<string | null>(null);
+
+  const copyToClipboard = (text: string) => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+      setCopiedDomain(text);
+      setTimeout(() => setCopiedDomain(null), 2500);
+    }
+  };
 
   const handleGoogleClick = async () => {
     setIsSubmitting(true);
@@ -97,17 +111,108 @@ export const Login: React.FC = () => {
 
         {/* Auth Error Banner if configuration or sign-in fails */}
         {authError && (
-          <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-xs space-y-1.5 animate-in fade-in duration-200">
-            <div className="flex items-start gap-2">
-              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-              <div>
-                <span className="font-bold block">Authentication Notice</span>
-                <p className="mt-0.5 leading-relaxed text-rose-800">{authError}</p>
+          <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-xs space-y-2.5 animate-in fade-in duration-200">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <span className="font-bold block text-rose-950">Authentication Notice</span>
+                  <p className="leading-relaxed text-rose-800">{authError}</p>
+                </div>
               </div>
+              <button
+                type="button"
+                onClick={() => setAuthError(null)}
+                className="text-rose-400 hover:text-rose-600 p-0.5 rounded transition-colors"
+                title="Dismiss notice"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
-            {authError.includes('Firebase Console') && (
-              <div className="mt-2 pt-2 border-t border-rose-200/60 text-[11px] text-rose-700">
-                Tip: You can use Email/Password sign-in below, or try Demo mode.
+
+            {authError.includes('Authorized Domains') && (
+              <div className="mt-2 pt-2 border-t border-rose-200/70 text-[11px] text-rose-800 space-y-2">
+                <p className="font-semibold text-rose-950">
+                  Add domain to Authorized Domains in Firebase (project: <strong>{resolvedFirebaseConfig.projectId}</strong>):
+                </p>
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-lg border border-rose-200 shadow-2xs">
+                    <span className="font-mono text-[11px] text-slate-800 truncate mr-2">
+                      {typeof window !== 'undefined' ? window.location.hostname : 'skill-path-fadp.vercel.app'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        copyToClipboard(typeof window !== 'undefined' ? window.location.hostname : 'skill-path-fadp.vercel.app')
+                      }
+                      className="px-2 py-0.5 rounded bg-rose-100 hover:bg-rose-200 text-rose-800 font-semibold text-[10px] shrink-0 flex items-center gap-1 transition-colors cursor-pointer"
+                    >
+                      {copiedDomain === (typeof window !== 'undefined' ? window.location.hostname : 'skill-path-fadp.vercel.app') ? (
+                        <>
+                          <Check className="w-3 h-3 text-emerald-600" />
+                          <span className="text-emerald-700">Copied</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3 h-3" />
+                          <span>Copy</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {typeof window !== 'undefined' &&
+                    window.location.hostname !== 'skill-path-fadp.vercel.app' && (
+                      <div className="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-lg border border-rose-200 shadow-2xs">
+                        <span className="font-mono text-[11px] text-slate-800 truncate mr-2">
+                          skill-path-fadp.vercel.app
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard('skill-path-fadp.vercel.app')}
+                          className="px-2 py-0.5 rounded bg-rose-100 hover:bg-rose-200 text-rose-800 font-semibold text-[10px] shrink-0 flex items-center gap-1 transition-colors cursor-pointer"
+                        >
+                          {copiedDomain === 'skill-path-fadp.vercel.app' ? (
+                            <>
+                              <Check className="w-3 h-3 text-emerald-600" />
+                              <span className="text-emerald-700">Copied</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3 h-3" />
+                              <span>Copy</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <a
+                    href={`https://console.firebase.google.com/project/${resolvedFirebaseConfig.projectId}/authentication/settings`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-rose-700 hover:bg-rose-800 text-white rounded-lg font-bold text-[11px] shadow-xs transition-colors"
+                  >
+                    <span>Open Firebase Auth Settings</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                  <button
+                    type="button"
+                    onClick={handleTryDemo}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 rounded-lg font-semibold text-[11px] transition-colors cursor-pointer"
+                  >
+                    <Zap className="w-3 h-3 text-indigo-600" />
+                    <span>Try Demo Mode</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {(authError.includes('Firebase Console') || authError.includes('Authorized Domains')) && (
+              <div className="mt-1 pt-1 text-[11px] text-slate-600 border-t border-rose-100">
+                You can also use <strong>Email / Password</strong> sign-in below, or click <strong>Try Demo</strong>.
               </div>
             )}
           </div>
