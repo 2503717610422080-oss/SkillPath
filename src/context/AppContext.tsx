@@ -13,7 +13,21 @@ import {
 } from '../types';
 import { StorageService } from '../services/storageService';
 import { computeSkillGap, computeRoleAlignment } from '../services/skillEngine';
-import { auth, signInAnonymously } from '../firebase';
+import {
+  auth,
+  googleProvider,
+  signInWithPopup,
+  signInWithCredential,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signInAnonymously,
+  signOut,
+  linkWithPopup,
+  updateProfile,
+  onAuthStateChanged,
+  GoogleAuthProvider,
+  User
+} from '../firebase';
 
 export type AppPage =
   | 'login'
@@ -34,6 +48,7 @@ interface AppContextType {
   currentPage: AppPage;
   setCurrentPage: (page: AppPage) => void;
   uid: string;
+  firebaseUser: User | null;
   profile: UserProfile;
   setProfile: (p: UserProfile) => void;
   targetRole: TargetRoleProfile;
@@ -53,8 +68,17 @@ interface AppContextType {
   lastInterviewEvaluation: InterviewSession | null;
   selectedSkillForProof: { skillName: string; topic?: string } | null;
   setSelectedSkillForProof: (s: { skillName: string; topic?: string } | null) => void;
+  authError: string | null;
+  setAuthError: (err: string | null) => void;
   
-  // Actions
+  // Auth Actions
+  loginWithGoogle: () => Promise<{ success: boolean; error?: string }>;
+  loginWithEmail: (email: string, pass: string) => Promise<{ success: boolean; error?: string }>;
+  signupWithEmail: (email: string, pass: string, name?: string) => Promise<{ success: boolean; error?: string }>;
+  continueAsGuest: () => Promise<void>;
+  logout: () => Promise<void>;
+
+  // Data Actions
   updateSelfClaimRatings: (claims: Record<string, number>) => Promise<void>;
   saveJobAnalysis: (roleData: TargetRoleProfile) => Promise<void>;
   completeBaselineAssessment: (answers: StudentAnswer[]) => Promise<void>;
@@ -80,6 +104,9 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentPage, setCurrentPage] = useState<AppPage>('dashboard');
   const [uid, setUid] = useState<string>('demo-student-user');
+  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
+
   const [profile, setProfile] = useState<UserProfile>({
     uid: 'demo-student-user',
     displayName: 'Alex Morgan',
@@ -109,46 +136,255 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }, 4500);
   };
 
-  // Initial load
+  // Helper to load all user documents for a given UID
+  const loadUserData = async (targetUid: string) => {
+    try {
+      const p = await StorageService.getUserProfile(targetUid);
+      setProfile(p);
+
+      const r = await StorageService.getTargetRole(targetUid);
+      setTargetRole(r);
+
+      const s = await StorageService.getUserSkills(targetUid);
+      setUserSkills(s);
+
+      const l = await StorageService.getLearningPlan(targetUid);
+      setLearningPlan(l);
+
+      const pr = await StorageService.getProjects(targetUid);
+      setProjects(pr);
+
+      const res = await StorageService.getResume(targetUid);
+      setResume(res);
+    } catch (err) {
+      console.error('Error loading user data:', err);
+    }
+  };
+
+  // Listen to persistent Firebase Auth state
   useEffect(() => {
-    const initApp = async () => {
-      try {
-        // Attempt anonymous sign-in or use demo UID
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      setIsLoading(true);
+      if (user) {
+        setFirebaseUser(user);
+        setUid(user.uid);
         try {
-          const cred = await signInAnonymously(auth);
-          if (cred?.user?.uid) {
-            setUid(cred.user.uid);
-          }
+          await StorageService.createOrUpdateUserProfile(user.uid, {
+            displayName: user.displayName,
+            email: user.email,
+            photoURL: user.photoURL,
+            isAnonymous: user.isAnonymous,
+          });
+          await loadUserData(user.uid);
         } catch (e) {
-          console.log('Using default demo UID');
+          console.warn('Auth user setup warning:', e);
+          await loadUserData(user.uid);
         }
-
-        const p = await StorageService.getUserProfile(uid);
-        setProfile(p);
-
-        const r = await StorageService.getTargetRole(uid);
-        setTargetRole(r);
-
-        const s = await StorageService.getUserSkills(uid);
-        setUserSkills(s);
-
-        const l = await StorageService.getLearningPlan(uid);
-        setLearningPlan(l);
-
-        const pr = await StorageService.getProjects(uid);
-        setProjects(pr);
-
-        const res = await StorageService.getResume(uid);
-        setResume(res);
-      } catch (err) {
-        console.error('App init error:', err);
-      } finally {
-        setIsLoading(false);
+      } else {
+        setFirebaseUser(null);
+        // Default to demo/guest session so user can explore seamlessly
+        setUid('demo-student-user');
+        await loadUserData('demo-student-user');
       }
-    };
+      setIsLoading(false);
+    });
 
-    initApp();
-  }, [uid]);
+    return () => unsubscribe();
+  }, []);
+
+  // AUTH ACTION 1: Google Authentication (with smart linking of anonymous progress)
+  const loginWithGoogle = async (): Promise<{ success: boolean; error?: string }> => {
+    setAuthError(null);
+    const currentAnon = auth.currentUser;
+    const isAnon = currentAnon && currentAnon.isAnonymous;
+    const prevUid = currentAnon ? currentAnon.uid : null;
+
+    try {
+      if (isAnon) {
+        // Upgrade anonymous account to Google account to preserve all data!
+        try {
+          const res = await linkWithPopup(currentAnon, googleProvider);
+          if (res.user) {
+            setFirebaseUser(res.user);
+            await StorageService.createOrUpdateUserProfile(res.user.uid, {
+              displayName: res.user.displayName,
+              email: res.user.email,
+              photoURL: res.user.photoURL,
+              isAnonymous: false,
+            });
+            showNotification(`Google account linked! All target role, assessment & skill data preserved for ${res.user.displayName || res.user.email}.`);
+            setCurrentPage('dashboard');
+            return { success: true };
+          }
+        } catch (linkErr: any) {
+          if (linkErr.code === 'auth/credential-already-in-use') {
+            // Google account already exists -> sign in and migrate data
+            const cred = GoogleAuthProvider.credentialFromError(linkErr);
+            if (cred) {
+              const signInRes = await signInWithCredential(auth, cred);
+              if (signInRes.user) {
+                setFirebaseUser(signInRes.user);
+                setUid(signInRes.user.uid);
+                if (prevUid) {
+                  await StorageService.migrateUserData(prevUid, signInRes.user.uid);
+                }
+                await StorageService.createOrUpdateUserProfile(signInRes.user.uid, {
+                  displayName: signInRes.user.displayName,
+                  email: signInRes.user.email,
+                  photoURL: signInRes.user.photoURL,
+                  isAnonymous: false,
+                });
+                await loadUserData(signInRes.user.uid);
+                showNotification(`Signed in to Google account. Data synchronized successfully!`);
+                setCurrentPage('dashboard');
+                return { success: true };
+              }
+            }
+          }
+          throw linkErr;
+        }
+      } else {
+        // Standard Google sign-in
+        const res = await signInWithPopup(auth, googleProvider);
+        if (res.user) {
+          setFirebaseUser(res.user);
+          setUid(res.user.uid);
+          await StorageService.createOrUpdateUserProfile(res.user.uid, {
+            displayName: res.user.displayName,
+            email: res.user.email,
+            photoURL: res.user.photoURL,
+            isAnonymous: false,
+          });
+          await loadUserData(res.user.uid);
+          showNotification(`Welcome back, ${res.user.displayName || res.user.email}!`);
+          setCurrentPage('dashboard');
+          return { success: true };
+        }
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error('Google Auth error:', err);
+      let friendlyError = err.message || 'Google sign-in failed.';
+      if (err.code === 'auth/configuration-not-found' || err.code === 'auth/operation-not-allowed') {
+        friendlyError = 'Google Sign-In is not enabled in Firebase Console. Please enable Google under Authentication > Sign-in method in Firebase Console.';
+      } else if (err.code === 'auth/unauthorized-domain') {
+        friendlyError = `Domain unauthorized for OAuth: ${window.location.hostname}. Please add this domain to Authorized Domains in Firebase Authentication Settings.`;
+      } else if (err.code === 'auth/popup-blocked') {
+        friendlyError = 'Google sign-in popup was blocked by your browser. Please allow popups for this site.';
+      } else if (err.code === 'auth/popup-closed-by-user') {
+        friendlyError = 'Sign-in popup was closed before completing.';
+      }
+      setAuthError(friendlyError);
+      return { success: false, error: friendlyError };
+    }
+  };
+
+  // AUTH ACTION 2: Email + Password Login
+  const loginWithEmail = async (email: string, pass: string): Promise<{ success: boolean; error?: string }> => {
+    setAuthError(null);
+    try {
+      const cred = await signInWithEmailAndPassword(auth, email, pass);
+      if (cred.user) {
+        setFirebaseUser(cred.user);
+        setUid(cred.user.uid);
+        await loadUserData(cred.user.uid);
+        showNotification(`Signed in as ${cred.user.email}`);
+        setCurrentPage('dashboard');
+        return { success: true };
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error('Email signin error:', err);
+      let msg = err.message || 'Login failed.';
+      if (
+        err.code === 'auth/invalid-credential' ||
+        err.code === 'auth/wrong-password' ||
+        err.code === 'auth/user-not-found'
+      ) {
+        msg = 'Invalid email or password.';
+      } else if (err.code === 'auth/invalid-email') {
+        msg = 'Invalid email address format.';
+      }
+      setAuthError(msg);
+      return { success: false, error: msg };
+    }
+  };
+
+  // AUTH ACTION 3: Create Account with Email + Password
+  const signupWithEmail = async (
+    email: string,
+    pass: string,
+    name?: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    setAuthError(null);
+    const prevAnon = auth.currentUser?.isAnonymous ? auth.currentUser.uid : null;
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, email, pass);
+      if (cred.user) {
+        if (name) {
+          try {
+            await updateProfile(cred.user, { displayName: name });
+          } catch (e) {
+            console.warn('Profile name update error:', e);
+          }
+        }
+        if (prevAnon) {
+          await StorageService.migrateUserData(prevAnon, cred.user.uid);
+        }
+        await StorageService.createOrUpdateUserProfile(cred.user.uid, {
+          displayName: name || email.split('@')[0],
+          email: cred.user.email,
+          isAnonymous: false,
+        });
+        setFirebaseUser(cred.user);
+        setUid(cred.user.uid);
+        await loadUserData(cred.user.uid);
+        showNotification(`Account created! Welcome, ${name || email}!`);
+        setCurrentPage('dashboard');
+        return { success: true };
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error('Signup error:', err);
+      let msg = err.message || 'Signup failed.';
+      if (err.code === 'auth/email-already-in-use') {
+        msg = 'An account with this email already exists. Please log in.';
+      } else if (err.code === 'auth/weak-password') {
+        msg = 'Password should be at least 6 characters.';
+      }
+      setAuthError(msg);
+      return { success: false, error: msg };
+    }
+  };
+
+  // AUTH ACTION 4: Continue as Guest / Demo
+  const continueAsGuest = async () => {
+    try {
+      const cred = await signInAnonymously(auth);
+      if (cred.user) {
+        showNotification('Signed in as Guest candidate. You can link Google at any time to preserve progress.');
+        setCurrentPage('dashboard');
+        return;
+      }
+    } catch (e) {
+      console.warn('Anonymous auth warning, continuing with demo profile:', e);
+    }
+    setCurrentPage('dashboard');
+  };
+
+  // AUTH ACTION 5: Logout
+  const logout = async () => {
+    try {
+      await signOut(auth);
+    } catch (e) {
+      console.warn('Signout warning:', e);
+    }
+    setFirebaseUser(null);
+    setUid('demo-student-user');
+    await loadUserData('demo-student-user');
+    showNotification('Signed out successfully.');
+    setCurrentPage('login');
+  };
 
   // Derived gaps and alignment
   const skillGaps = userSkills.map(computeSkillGap).sort((a, b) => {
@@ -316,7 +552,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setLastInterviewEvaluation(session);
 
     if (session.evaluation) {
-      const overall = session.evaluation.overallScore;
       let current = [...userSkills];
 
       // Update interview score for weak areas or core skills
@@ -408,7 +643,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // ACTION: Search and attach live resources using Gemini Google Search
   const searchAndAttachLiveResources = async (itemId: string, skill: string, topic: string) => {
-    // Mark item as searching
     setLearningPlan((prev) =>
       prev.map((i) => (i.id === itemId ? { ...i, isSearchingResources: true } : i))
     );
@@ -431,7 +665,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setLearningPlan((prev) => {
         const updated = prev.map((item) => {
           if (item.id !== itemId) return item;
-          // Merge discovered resources avoiding duplicates
           const existingUrls = new Set((item.learningResources || []).map((r) => r.url));
           const newUnique = discovered.filter((r: any) => !existingUrls.has(r.url));
           const merged = [...(item.learningResources || []), ...newUnique];
@@ -458,16 +691,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // ACTION: Reset demo
   const resetAllDemoData = async () => {
     await StorageService.resetToDemoData(uid);
-    const s = await StorageService.getUserSkills(uid);
-    setUserSkills(s);
-    const r = await StorageService.getTargetRole(uid);
-    setTargetRole(r);
-    const l = await StorageService.getLearningPlan(uid);
-    setLearningPlan(l);
-    const pr = await StorageService.getProjects(uid);
-    setProjects(pr);
-    const res = await StorageService.getResume(uid);
-    setResume(res);
+    await loadUserData(uid);
     setLastAssessment(null);
     setActiveInterview(null);
     setLastInterviewEvaluation(null);
@@ -480,6 +704,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         currentPage,
         setCurrentPage,
         uid,
+        firebaseUser,
         profile,
         setProfile,
         targetRole,
@@ -499,6 +724,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         lastInterviewEvaluation,
         selectedSkillForProof,
         setSelectedSkillForProof,
+        authError,
+        setAuthError,
+        loginWithGoogle,
+        loginWithEmail,
+        signupWithEmail,
+        continueAsGuest,
+        logout,
         updateSelfClaimRatings,
         saveJobAnalysis,
         completeBaselineAssessment,

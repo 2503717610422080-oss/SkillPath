@@ -225,6 +225,49 @@ export class StorageService {
     }
   }
 
+  static async createOrUpdateUserProfile(
+    uid: string,
+    authUser: { displayName?: string | null; email?: string | null; photoURL?: string | null; isAnonymous?: boolean }
+  ): Promise<UserProfile> {
+    const existing = await this.getUserProfile(uid);
+    const updated: UserProfile = {
+      ...existing,
+      uid,
+      userId: uid,
+      displayName: authUser.displayName || existing.displayName || 'Candidate',
+      name: authUser.displayName || existing.displayName || 'Candidate',
+      email: authUser.email || existing.email || '',
+      photoURL: authUser.photoURL || existing.photoURL || '',
+      isAnonymous: authUser.isAnonymous ?? false,
+      lastLoginAt: new Date().toISOString(),
+      createdAt: existing.createdAt || new Date().toISOString(),
+    };
+
+    await this.saveUserProfile(updated);
+    return updated;
+  }
+
+  // Migrate anonymous/guest user data to an authenticated Google user UID
+  static async migrateUserData(fromUid: string, toUid: string): Promise<void> {
+    if (!fromUid || !toUid || fromUid === toUid) return;
+
+    try {
+      const role = await this.getTargetRole(fromUid);
+      const skills = await this.getUserSkills(fromUid);
+      const learning = await this.getLearningPlan(fromUid);
+      const projects = await this.getProjects(fromUid);
+      const resume = await this.getResume(fromUid);
+
+      await this.saveTargetRole(toUid, role);
+      await this.saveUserSkills(toUid, skills);
+      await this.saveLearningPlan(toUid, learning);
+      await this.saveProjects(toUid, projects);
+      await this.saveResume(toUid, resume);
+    } catch (err) {
+      console.warn('Migration warning:', err);
+    }
+  }
+
   // Reset demo data
   static async resetToDemoData(uid: string): Promise<void> {
     setLocal(`skills_${uid}`, INITIAL_DEMO_SKILLS);

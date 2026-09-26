@@ -98,9 +98,19 @@ export type ResourcePlatform =
   | 'YouTube'
   | 'freeCodeCamp'
   | 'LeetCode'
+  | 'HackerRank'
   | 'Documentation'
+  | 'MDN'
+  | 'Microsoft Learn'
+  | 'AWS Skill Builder'
+  | 'Oracle Docs'
+  | 'Spring Docs'
+  | 'PostgreSQL Docs'
   | 'GeeksforGeeks'
   | 'Coursera'
+  | 'edX'
+  | 'Khan Academy'
+  | 'W3Schools'
   | 'GitHub'
   | 'Interactive';
 
@@ -108,7 +118,7 @@ export interface LearningResource {
   id: string;
   title: string;
   platform: ResourcePlatform;
-  type: 'Video' | 'Interactive Practice' | 'Official Docs' | 'Guide' | 'Problem Set';
+  type: 'Video' | 'Interactive Practice' | 'Official Docs' | 'Guide' | 'Problem Set' | 'Course';
   url: string;
   creator?: string;
   durationOrReadTime?: string;
@@ -220,10 +230,15 @@ export interface ResumeData {
 
 export interface UserProfile {
   uid: string;
+  userId?: string;
   displayName: string;
+  name?: string;
   email: string;
+  photoURL?: string;
   targetRole: string;
   targetCompany: string;
   onboardingComplete: boolean;
   createdAt: string;
+  lastLoginAt?: string;
+  isAnonymous?: boolean;
 }

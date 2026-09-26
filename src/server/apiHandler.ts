@@ -241,36 +241,70 @@ Return a valid JSON object with an array of "items":
       return true;
     }
 
-    // 3.5 SEARCH REAL EXTERNAL RESOURCES (with Google Search Grounding)
+    // 3.5 SEARCH REAL EXTERNAL RESOURCES (with Google Search Grounding & YouTube API)
     if (url === '/api/search-resources' && req.method === 'POST') {
       const body = await parseBody(req);
       const { topic, skill, subGap, targetRole } = body;
 
-      const searchPrompt = `Search the web for real, reputable external learning resources for a candidate targeting "${targetRole || 'Software Engineer'}" needing to master "${topic}" (Skill: ${skill}, Sub-gap: ${subGap || topic}).
-Find real resources that actually exist from:
-1. YouTube (video tutorials by channels like freeCodeCamp.org, NeetCode, Traversy Media, Hussein Nasser, Fireship, Abdul Bari)
-2. LeetCode / HackerRank interactive problems
-3. Official Documentation (PostgreSQL, Oracle Java Docs, Git-SCM, MDN)
-4. GeeksforGeeks / freeCodeCamp articles
+      const results: any[] = [];
+      const apiKey = process.env.YOUTUBE_API_KEY || process.env.GEMINI_API_KEY;
+
+      // 1. YouTube Data API search attempt if API key is present
+      if (apiKey && apiKey !== 'MY_GEMINI_API_KEY') {
+        try {
+          const ytUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&maxResults=3&q=${encodeURIComponent(
+            `${skill} ${topic} tutorial`
+          )}&type=video&key=${apiKey}`;
+          const ytRes = await fetch(ytUrl);
+          if (ytRes.ok) {
+            const ytData = await ytRes.json();
+            if (ytData.items && Array.isArray(ytData.items)) {
+              for (const item of ytData.items) {
+                if (item.id?.videoId && item.snippet?.title) {
+                  results.push({
+                    id: `yt_${item.id.videoId}`,
+                    title: item.snippet.title,
+                    platform: 'YouTube',
+                    type: 'Video',
+                    url: `https://www.youtube.com/watch?v=${item.id.videoId}`,
+                    creator: item.snippet.channelTitle || 'Verified Channel',
+                    durationOrReadTime: 'Video Tutorial',
+                    relevanceScore: 93,
+                  });
+                }
+              }
+            }
+          }
+        } catch (ytErr) {
+          console.warn('YouTube search API fetch warning:', ytErr);
+        }
+      }
+
+      // 2. Gemini Google Search Grounding search
+      const searchPrompt = `Search the live web for actual, verifiable learning resources for "${topic}" (Skill: ${skill}, Target Role: ${targetRole || 'Software Engineer'}).
+Discover real public resources from:
+1. Official documentation (PostgreSQL, Oracle Java Docs, Spring Docs, MDN, Microsoft Learn, AWS Skill Builder, Git-SCM)
+2. High-quality educational resources (freeCodeCamp, GeeksforGeeks, Coursera, edX, Khan Academy, W3Schools)
+3. Relevant practice platforms (LeetCode, HackerRank)
+4. YouTube educational content
 
 Return a valid JSON array of objects with schema:
 [
   {
     "id": "res_search_1",
     "title": "Exact Title of Tutorial or Problem",
-    "platform": "YouTube" | "freeCodeCamp" | "LeetCode" | "Documentation" | "GeeksforGeeks" | "Interactive",
-    "type": "Video" | "Interactive Practice" | "Official Docs" | "Guide" | "Problem Set",
+    "platform": "Official Docs" | "YouTube" | "LeetCode" | "freeCodeCamp" | "GeeksforGeeks" | "HackerRank" | "MDN",
+    "type": "Official Docs" | "Video" | "Interactive Practice" | "Guide" | "Problem Set",
     "url": "https://actual-working-url...",
-    "creator": "Channel or Author Name",
-    "durationOrReadTime": "e.g. 20 min video, 15 min read, 25 min practice",
+    "creator": "Organization or Channel Name",
+    "durationOrReadTime": "e.g. 15 min read, 25 min practice, 30 min video",
     "relevanceScore": 95
   }
 ]
-Only return resources that actually exist.`;
+Do NOT invent URLs. Only return real, verifiable links.`;
 
       if (ai) {
         try {
-          // Use Google Search Grounding to discover real URLs
           const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
             contents: searchPrompt,
@@ -280,28 +314,28 @@ Only return resources that actually exist.`;
           });
 
           const rawText = response.text || '';
-          // Extract JSON array if present
           const jsonMatch = rawText.match(/\[[\s\S]*\]/);
           if (jsonMatch) {
             try {
               const parsed = JSON.parse(jsonMatch[0]);
               if (Array.isArray(parsed) && parsed.length > 0) {
-                // Ensure URLs and platform formatting
-                const sanitized = parsed.map((item, idx) => ({
-                  id: item.id || `search_res_${Date.now()}_${idx}`,
-                  title: item.title || `${topic} Tutorial`,
-                  platform: item.platform || 'YouTube',
-                  type: item.type || 'Video',
-                  url: item.url || `https://www.youtube.com/results?search_query=${encodeURIComponent(item.title || topic)}`,
-                  creator: item.creator || 'Verified Educator',
-                  durationOrReadTime: item.durationOrReadTime || '20 min',
-                  relevanceScore: item.relevanceScore || 95 - idx * 2,
-                }));
-                sendJson(res, 200, { resources: sanitized, source: 'gemini-grounded-search' });
-                return true;
+                for (const item of parsed) {
+                  if (item.url && item.title) {
+                    results.push({
+                      id: item.id || `search_res_${Date.now()}_${results.length}`,
+                      title: item.title,
+                      platform: item.platform || 'Documentation',
+                      type: item.type || 'Guide',
+                      url: item.url,
+                      creator: item.creator || 'Verified Resource',
+                      durationOrReadTime: item.durationOrReadTime || '15 min read',
+                      relevanceScore: item.relevanceScore || 95,
+                    });
+                  }
+                }
               }
             } catch (jsonErr) {
-              console.warn('Grounded search JSON parse error, merging curated:', jsonErr);
+              console.warn('Grounded search JSON parse error:', jsonErr);
             }
           }
         } catch (error) {
@@ -309,9 +343,45 @@ Only return resources that actually exist.`;
         }
       }
 
-      // Return curated verified real resources for this skill and topic
+      // 3. Merge with verified catalog to guarantee complete coverage
       const curated = getVerifiedResourcesForSkill(skill, topic);
-      sendJson(res, 200, { resources: curated, source: 'verified-catalog' });
+      const existingUrls = new Set(results.map((r) => r.url));
+      for (const cur of curated) {
+        if (!existingUrls.has(cur.url)) {
+          results.push(cur);
+        }
+      }
+
+      // 4. Rank resources strictly according to preference:
+      // Preference: 1. Official docs, 2. Educational, 3. Practice, 4. YouTube
+      const platformPriority: Record<string, number> = {
+        'Documentation': 1,
+        'PostgreSQL Docs': 1,
+        'Oracle Docs': 1,
+        'Spring Docs': 1,
+        'MDN': 1,
+        'Microsoft Learn': 1,
+        'AWS Skill Builder': 1,
+        'freeCodeCamp': 2,
+        'GeeksforGeeks': 2,
+        'Coursera': 2,
+        'edX': 2,
+        'Khan Academy': 2,
+        'W3Schools': 2,
+        'LeetCode': 3,
+        'HackerRank': 3,
+        'Interactive': 3,
+        'YouTube': 4,
+      };
+
+      const ranked = results.sort((a, b) => {
+        const pA = platformPriority[a.platform] || 2;
+        const pB = platformPriority[b.platform] || 2;
+        if (pA !== pB) return pA - pB;
+        return (b.relevanceScore || 90) - (a.relevanceScore || 90);
+      });
+
+      sendJson(res, 200, { resources: ranked.slice(0, 8), source: 'gemini-grounded-youtube-catalog' });
       return true;
     }
 
@@ -709,84 +779,121 @@ function getVerifiedResourcesForSkill(skill: string, topic: string) {
 
   if (normSkill.includes('sql') || normTopic.includes('sql') || normTopic.includes('join') || normTopic.includes('window')) {
     return [
+      // 1. Official Documentation
       {
         id: `res_sql_${Date.now()}_1`,
-        title: "SQL Joins Tutorial for Beginners (Inner, Left, Right, Full)",
-        platform: "YouTube",
-        type: "Video",
-        creator: "freeCodeCamp.org",
-        durationOrReadTime: "28 min video",
-        url: "https://www.youtube.com/watch?v=2HVMiPPuPIM",
-        relevanceScore: 98
-      },
-      {
-        id: `res_sql_${Date.now()}_2`,
-        title: "PostgreSQL Window Functions Masterclass (OVER, PARTITION BY, RANK)",
-        platform: "YouTube",
-        type: "Video",
-        creator: "Hussein Nasser",
-        durationOrReadTime: "35 min video",
-        url: "https://www.youtube.com/watch?v=D5sZ3F5n5iU",
-        relevanceScore: 95
-      },
-      {
-        id: `res_sql_${Date.now()}_3`,
         title: "PostgreSQL Official Documentation: 3.5 Window Functions",
-        platform: "Documentation",
+        platform: "PostgreSQL Docs",
         type: "Official Docs",
         creator: "PostgreSQL Global Development Group",
         durationOrReadTime: "15 min read",
         url: "https://www.postgresql.org/docs/current/tutorial-window.html",
-        relevanceScore: 94
+        relevanceScore: 98
       },
       {
-        id: `res_sql_${Date.now()}_4`,
-        title: "LeetCode 185: Department Top Three Salaries (Window Function Challenge)",
-        platform: "LeetCode",
-        type: "Interactive Practice",
-        creator: "LeetCode Database",
-        durationOrReadTime: "25 min challenge",
-        url: "https://leetcode.com/problems/department-top-three-salaries/",
+        id: `res_sql_${Date.now()}_2`,
+        title: "PostgreSQL Official Documentation: 7.2 Table Expressions - JOINs",
+        platform: "PostgreSQL Docs",
+        type: "Official Docs",
+        creator: "PostgreSQL Global Development Group",
+        durationOrReadTime: "18 min read",
+        url: "https://www.postgresql.org/docs/current/queries-table-expressions.html#QUERIES-FROM",
         relevanceScore: 96
       },
+      // 2. High-Quality Educational Resources
       {
-        id: `res_sql_${Date.now()}_5`,
+        id: `res_sql_${Date.now()}_3`,
         title: "SQL JOIN (Set 1 - Inner, Left, Right and Full Joins)",
         platform: "GeeksforGeeks",
         type: "Guide",
         creator: "GeeksforGeeks",
         durationOrReadTime: "12 min read",
         url: "https://www.geeksforgeeks.org/sql-join-set-1-inner-left-right-and-full-joins/",
+        relevanceScore: 92
+      },
+      {
+        id: `res_sql_${Date.now()}_4`,
+        title: "SQL Joins Explained with Visual Venn Diagrams",
+        platform: "freeCodeCamp",
+        type: "Guide",
+        creator: "freeCodeCamp.org",
+        durationOrReadTime: "10 min read",
+        url: "https://www.freecodecamp.org/news/sql-joins-tutorial/",
+        relevanceScore: 91
+      },
+      // 3. Relevant Practice Platforms
+      {
+        id: `res_sql_${Date.now()}_5`,
+        title: "LeetCode 185: Department Top Three Salaries (Window Function Challenge)",
+        platform: "LeetCode",
+        type: "Interactive Practice",
+        creator: "LeetCode Database",
+        durationOrReadTime: "25 min challenge",
+        url: "https://leetcode.com/problems/department-top-three-salaries/",
+        relevanceScore: 95
+      },
+      {
+        id: `res_sql_${Date.now()}_6`,
+        title: "LeetCode 175: Combine Two Tables (Core Outer Join Practice)",
+        platform: "LeetCode",
+        type: "Interactive Practice",
+        creator: "LeetCode Database",
+        durationOrReadTime: "15 min practice",
+        url: "https://leetcode.com/problems/combine-two-tables/",
+        relevanceScore: 93
+      },
+      // 4. YouTube Educational Content
+      {
+        id: `res_sql_${Date.now()}_7`,
+        title: "SQL Joins Tutorial for Beginners (Inner, Left, Right, Full)",
+        platform: "YouTube",
+        type: "Video",
+        creator: "freeCodeCamp.org",
+        durationOrReadTime: "28 min video",
+        url: "https://www.youtube.com/watch?v=2HVMiPPuPIM",
         relevanceScore: 90
+      },
+      {
+        id: `res_sql_${Date.now()}_8`,
+        title: "PostgreSQL Window Functions Masterclass (OVER, PARTITION BY, RANK)",
+        platform: "YouTube",
+        type: "Video",
+        creator: "Hussein Nasser",
+        durationOrReadTime: "35 min video",
+        url: "https://www.youtube.com/watch?v=D5sZ3F5n5iU",
+        relevanceScore: 89
       }
     ];
   }
 
   if (normSkill.includes('dsa') || normSkill.includes('algo') || normTopic.includes('graph') || normTopic.includes('tree') || normTopic.includes('dp')) {
     return [
+      // 1. Official Documentation / Reference
       {
         id: `res_dsa_${Date.now()}_1`,
-        title: "Graph Algorithms for Technical Interviews - Full Course",
-        platform: "YouTube",
-        type: "Video",
-        creator: "freeCodeCamp.org",
-        durationOrReadTime: "2 hr video",
-        url: "https://www.youtube.com/watch?v=tWVWeAqZ0WU",
+        title: "Depth-First Search (DFS) & Topological Sorting Algorithms",
+        platform: "GeeksforGeeks",
+        type: "Official Docs",
+        creator: "GeeksforGeeks CS Reference",
+        durationOrReadTime: "15 min read",
+        url: "https://www.geeksforgeeks.org/topological-sorting/",
         relevanceScore: 98
       },
+      // 2. High-Quality Educational Resources
       {
         id: `res_dsa_${Date.now()}_2`,
-        title: "Course Schedule - LeetCode 207 - Cycle Detection Walkthrough",
-        platform: "YouTube",
-        type: "Video",
-        creator: "NeetCode",
-        durationOrReadTime: "14 min video",
-        url: "https://www.youtube.com/watch?v=EgI5nU9etnU",
-        relevanceScore: 96
+        title: "Detect Cycle in a Directed Graph using DFS",
+        platform: "GeeksforGeeks",
+        type: "Guide",
+        creator: "GeeksforGeeks",
+        durationOrReadTime: "12 min read",
+        url: "https://www.geeksforgeeks.org/detect-cycle-in-a-graph/",
+        relevanceScore: 95
       },
+      // 3. Relevant Practice Platforms
       {
         id: `res_dsa_${Date.now()}_3`,
-        title: "LeetCode 207: Course Schedule (Cycle Detection in Directed Graph)",
+        title: "LeetCode 207: Course Schedule (Topological Sort / Cycle Detection)",
         platform: "LeetCode",
         type: "Interactive Practice",
         creator: "LeetCode Algorithms",
@@ -796,12 +903,33 @@ function getVerifiedResourcesForSkill(skill: string, topic: string) {
       },
       {
         id: `res_dsa_${Date.now()}_4`,
-        title: "Detect Cycle in a Directed Graph using DFS",
-        platform: "GeeksforGeeks",
-        type: "Guide",
-        creator: "GeeksforGeeks",
-        durationOrReadTime: "12 min read",
-        url: "https://www.geeksforgeeks.org/detect-cycle-in-a-graph/",
+        title: "LeetCode 200: Number of Islands (BFS / DFS Traversal)",
+        platform: "LeetCode",
+        type: "Interactive Practice",
+        creator: "LeetCode Algorithms",
+        durationOrReadTime: "20 min challenge",
+        url: "https://leetcode.com/problems/number-of-islands/",
+        relevanceScore: 94
+      },
+      // 4. YouTube Educational Content
+      {
+        id: `res_dsa_${Date.now()}_5`,
+        title: "Graph Algorithms for Technical Interviews - Full Course",
+        platform: "YouTube",
+        type: "Video",
+        creator: "freeCodeCamp.org",
+        durationOrReadTime: "2 hr video",
+        url: "https://www.youtube.com/watch?v=tWVWeAqZ0WU",
+        relevanceScore: 92
+      },
+      {
+        id: `res_dsa_${Date.now()}_6`,
+        title: "Course Schedule - LeetCode 207 - Cycle Detection Walkthrough",
+        platform: "YouTube",
+        type: "Video",
+        creator: "NeetCode",
+        durationOrReadTime: "14 min video",
+        url: "https://www.youtube.com/watch?v=EgI5nU9etnU",
         relevanceScore: 91
       }
     ];
@@ -809,36 +937,39 @@ function getVerifiedResourcesForSkill(skill: string, topic: string) {
 
   if (normSkill.includes('java') || normTopic.includes('concurr') || normTopic.includes('thread') || normTopic.includes('jvm')) {
     return [
+      // 1. Official Documentation
       {
         id: `res_java_${Date.now()}_1`,
-        title: "Java Multithreading & Concurrency Mastery Course",
-        platform: "YouTube",
-        type: "Video",
-        creator: "freeCodeCamp.org",
-        durationOrReadTime: "1.5 hr video",
-        url: "https://www.youtube.com/watch?v=r_MbozD32eo",
-        relevanceScore: 96
-      },
-      {
-        id: `res_java_${Date.now()}_2`,
-        title: "Java Memory Model & Volatile Keyword Explained",
-        platform: "YouTube",
-        type: "Video",
-        creator: "Defog Tech",
-        durationOrReadTime: "18 min video",
-        url: "https://www.youtube.com/watch?v=WH5UvQJizGU",
-        relevanceScore: 94
-      },
-      {
-        id: `res_java_${Date.now()}_3`,
         title: "Oracle Java Tutorials: Concurrency and Thread Synchronization",
-        platform: "Documentation",
+        platform: "Oracle Docs",
         type: "Official Docs",
         creator: "Oracle Java Documentation",
         durationOrReadTime: "20 min read",
         url: "https://docs.oracle.com/javase/tutorial/essential/concurrency/",
-        relevanceScore: 92
+        relevanceScore: 98
       },
+      {
+        id: `res_java_${Date.now()}_2`,
+        title: "Spring Framework Documentation: Asynchronous & Scheduling Integration",
+        platform: "Spring Docs",
+        type: "Official Docs",
+        creator: "Spring by VMware",
+        durationOrReadTime: "15 min read",
+        url: "https://docs.spring.io/spring-framework/reference/integration/scheduling.html",
+        relevanceScore: 95
+      },
+      // 2. High-Quality Educational Resources
+      {
+        id: `res_java_${Date.now()}_3`,
+        title: "Volatile Keyword in Java - What, Why and When?",
+        platform: "GeeksforGeeks",
+        type: "Guide",
+        creator: "GeeksforGeeks",
+        durationOrReadTime: "12 min read",
+        url: "https://www.geeksforgeeks.org/volatile-keyword-in-java/",
+        relevanceScore: 93
+      },
+      // 3. Relevant Practice Platforms
       {
         id: `res_java_${Date.now()}_4`,
         title: "LeetCode 1114: Print in Order (Concurrency Problem)",
@@ -847,33 +978,57 @@ function getVerifiedResourcesForSkill(skill: string, topic: string) {
         creator: "LeetCode Concurrency",
         durationOrReadTime: "15 min practice",
         url: "https://leetcode.com/problems/print-in-order/",
-        relevanceScore: 93
+        relevanceScore: 96
+      },
+      // 4. YouTube Educational Content
+      {
+        id: `res_java_${Date.now()}_5`,
+        title: "Java Multithreading & Concurrency Mastery Course",
+        platform: "YouTube",
+        type: "Video",
+        creator: "freeCodeCamp.org",
+        durationOrReadTime: "1.5 hr video",
+        url: "https://www.youtube.com/watch?v=r_MbozD32eo",
+        relevanceScore: 91
+      },
+      {
+        id: `res_java_${Date.now()}_6`,
+        title: "Java Memory Model & Volatile Keyword Explained",
+        platform: "YouTube",
+        type: "Video",
+        creator: "Defog Tech",
+        durationOrReadTime: "18 min video",
+        url: "https://www.youtube.com/watch?v=WH5UvQJizGU",
+        relevanceScore: 90
       }
     ];
   }
 
   if (normSkill.includes('git') || normTopic.includes('rebase') || normTopic.includes('merge')) {
     return [
+      // 1. Official Documentation
       {
         id: `res_git_${Date.now()}_1`,
-        title: "Git Rebase Explained in 100 Seconds",
-        platform: "YouTube",
-        type: "Video",
-        creator: "Fireship",
-        durationOrReadTime: "2 min video",
-        url: "https://www.youtube.com/watch?v=f1wnYdLEpgI",
-        relevanceScore: 97
-      },
-      {
-        id: `res_git_${Date.now()}_2`,
         title: "Git SCM Book: 3.6 Git Branching - Rebasing",
         platform: "Documentation",
         type: "Official Docs",
         creator: "Git SCM",
         durationOrReadTime: "15 min read",
         url: "https://git-scm.com/book/en/v2/Git-Branching-Rebasing",
-        relevanceScore: 95
+        relevanceScore: 98
       },
+      // 2. High-Quality Educational Resources
+      {
+        id: `res_git_${Date.now()}_2`,
+        title: "How to Rebase a Pull Request on GitHub",
+        platform: "freeCodeCamp",
+        type: "Guide",
+        creator: "freeCodeCamp.org",
+        durationOrReadTime: "10 min read",
+        url: "https://www.freecodecamp.org/news/how-to-rebase-a-pull-request/",
+        relevanceScore: 93
+      },
+      // 3. Relevant Practice Platforms
       {
         id: `res_git_${Date.now()}_3`,
         title: "Learn Git Branching (Interactive Visual Sandbox)",
@@ -882,17 +1037,18 @@ function getVerifiedResourcesForSkill(skill: string, topic: string) {
         creator: "LearnGitBranching",
         durationOrReadTime: "20 min sandbox",
         url: "https://learngitbranching.js.org/",
-        relevanceScore: 98
+        relevanceScore: 97
       },
+      // 4. YouTube Educational Content
       {
         id: `res_git_${Date.now()}_4`,
-        title: "How to Rebase a Pull Request on GitHub",
-        platform: "freeCodeCamp",
-        type: "Guide",
-        creator: "freeCodeCamp.org",
-        durationOrReadTime: "10 min read",
-        url: "https://www.freecodecamp.org/news/how-to-rebase-a-pull-request/",
-        relevanceScore: 91
+        title: "Git Rebase Explained in 100 Seconds",
+        platform: "YouTube",
+        type: "Video",
+        creator: "Fireship",
+        durationOrReadTime: "2 min video",
+        url: "https://www.youtube.com/watch?v=f1wnYdLEpgI",
+        relevanceScore: 92
       }
     ];
   }
@@ -901,13 +1057,13 @@ function getVerifiedResourcesForSkill(skill: string, topic: string) {
   return [
     {
       id: `res_gen_${Date.now()}_1`,
-      title: `${topic} Technical Deep Dive`,
-      platform: "YouTube",
-      type: "Video",
-      creator: "freeCodeCamp.org",
-      durationOrReadTime: "40 min video",
-      url: `https://www.youtube.com/results?search_query=${encodeURIComponent(`${skill} ${topic} tutorial freecodecamp`)}`,
-      relevanceScore: 92
+      title: `${topic} Official Documentation & Architecture Reference`,
+      platform: "Documentation",
+      type: "Official Docs",
+      creator: "Official Standards Group",
+      durationOrReadTime: "15 min read",
+      url: `https://developer.mozilla.org/en-US/search?q=${encodeURIComponent(topic)}`,
+      relevanceScore: 98
     },
     {
       id: `res_gen_${Date.now()}_2`,
@@ -917,7 +1073,17 @@ function getVerifiedResourcesForSkill(skill: string, topic: string) {
       creator: "GeeksforGeeks",
       durationOrReadTime: "15 min read",
       url: `https://www.google.com/search?q=${encodeURIComponent(`${skill} ${topic} site:geeksforgeeks.org`)}`,
-      relevanceScore: 89
+      relevanceScore: 92
+    },
+    {
+      id: `res_gen_${Date.now()}_3`,
+      title: `${topic} Technical Deep Dive`,
+      platform: "YouTube",
+      type: "Video",
+      creator: "freeCodeCamp.org",
+      durationOrReadTime: "40 min video",
+      url: `https://www.youtube.com/results?search_query=${encodeURIComponent(`${skill} ${topic} tutorial freecodecamp`)}`,
+      relevanceScore: 90
     }
   ];
 }
