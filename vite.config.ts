@@ -12,7 +12,16 @@ const apiPlugin = (): Plugin => ({
   name: 'api-server-middleware',
   configureServer(server) {
     server.middlewares.use(async (req, res, next) => {
-      if (req.url && req.url.startsWith('/api/')) {
+      if (req.url && req.url.includes('/api/')) {
+        const handled = await handleApiRoute(req, res);
+        if (handled) return;
+      }
+      next();
+    });
+  },
+  configurePreviewServer(server) {
+    server.middlewares.use(async (req, res, next) => {
+      if (req.url && req.url.includes('/api/')) {
         const handled = await handleApiRoute(req, res);
         if (handled) return;
       }

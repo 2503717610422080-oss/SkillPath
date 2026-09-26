@@ -35,8 +35,20 @@ const sendJson = (res: ServerResponse, statusCode: number, data: any) => {
 };
 
 export async function handleApiRoute(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
-  const url = req.url || '';
-  if (!url.startsWith('/api/')) {
+  const rawUrl = req.url || '';
+  const host = req.headers.host || 'localhost';
+  let pathname = rawUrl;
+  try {
+    const parsedUrl = new URL(rawUrl, `http://${host}`);
+    pathname = parsedUrl.pathname;
+  } catch (e) {
+    pathname = rawUrl.split('?')[0];
+  }
+  if (pathname.length > 1 && pathname.endsWith('/')) {
+    pathname = pathname.slice(0, -1);
+  }
+
+  if (!pathname.startsWith('/api')) {
     return false;
   }
 
@@ -55,7 +67,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
     const ai = getGeminiClient();
 
     // 1. ANALYZE JOB
-    if (url === '/api/analyze-job' && req.method === 'POST') {
+    if (pathname === '/api/analyze-job' && req.method === 'POST') {
       const body = await parseBody(req);
       const { roleTitle, company, jobDescription } = body;
 
@@ -105,7 +117,7 @@ Return a valid JSON object matching this schema:
     }
 
     // 2. EVALUATE ANSWER
-    if (url === '/api/evaluate-answer' && req.method === 'POST') {
+    if (pathname === '/api/evaluate-answer' && req.method === 'POST') {
       const body = await parseBody(req);
       const { question, studentAnswer, rubric, skillName } = body;
 
@@ -156,7 +168,7 @@ Return a valid JSON object:
     }
 
     // 3. GENERATE PERSONALIZED LEARNING PATH WITH REAL EXTERNAL RESOURCES
-    if (url === '/api/generate-learning-path' && req.method === 'POST') {
+    if (pathname === '/api/generate-learning-path' && req.method === 'POST') {
       const body = await parseBody(req);
       const { roleTitle, company, skillGaps, userSkills } = body;
 
@@ -242,7 +254,7 @@ Return a valid JSON object with an array of "items":
     }
 
     // 3.5 SEARCH REAL EXTERNAL RESOURCES (with Google Search Grounding & YouTube API)
-    if (url === '/api/search-resources' && req.method === 'POST') {
+    if (pathname === '/api/search-resources' && req.method === 'POST') {
       const body = await parseBody(req);
       const { topic, skill, subGap, targetRole } = body;
 
@@ -386,7 +398,7 @@ Do NOT invent URLs. Only return real, verifiable links.`;
     }
 
     // 4. GENERATE PROVE QUIZ (Reassessment)
-    if (url === '/api/generate-prove-quiz' && req.method === 'POST') {
+    if (pathname === '/api/generate-prove-quiz' && req.method === 'POST') {
       const body = await parseBody(req);
       const { skillName, topic, currentDemonstrated } = body;
 
@@ -444,7 +456,7 @@ Return valid JSON:
     }
 
     // 5. INTERVIEW: START
-    if (url === '/api/interview/start' && req.method === 'POST') {
+    if (pathname === '/api/interview/start' && req.method === 'POST') {
       const body = await parseBody(req);
       const { roleTitle, company, weakSkills, projects } = body;
 
@@ -486,7 +498,7 @@ Return valid JSON:
     }
 
     // 6. INTERVIEW: TURN (Adaptive follow-up)
-    if (url === '/api/interview/turn' && req.method === 'POST') {
+    if (pathname === '/api/interview/turn' && req.method === 'POST') {
       const body = await parseBody(req);
       const { roleTitle, company, transcript, lastQuestion, lastAnswer, turnIndex } = body;
 
@@ -537,7 +549,7 @@ Return valid JSON:
     }
 
     // 7. INTERVIEW: EVALUATE
-    if (url === '/api/interview/evaluate' && req.method === 'POST') {
+    if (pathname === '/api/interview/evaluate' && req.method === 'POST') {
       const body = await parseBody(req);
       const { roleTitle, company, transcript } = body;
 
@@ -622,7 +634,7 @@ Return valid JSON:
     }
 
     // 8. ANALYZE PROJECT
-    if (url === '/api/analyze-project' && req.method === 'POST') {
+    if (pathname === '/api/analyze-project' && req.method === 'POST') {
       const body = await parseBody(req);
       const { name, githubUrl, description } = body;
 
@@ -676,7 +688,7 @@ Return valid JSON:
     }
 
     // 9. TAILOR RESUME
-    if (url === '/api/tailor-resume' && req.method === 'POST') {
+    if (pathname === '/api/tailor-resume' && req.method === 'POST') {
       const body = await parseBody(req);
       const { resume, targetRole, targetCompany, jobDescription } = body;
 

@@ -54,6 +54,37 @@ export const PracticeProve: React.FC = () => {
     skill: string;
   } | null>(null);
 
+  const generateClientFallbackQuiz = (skill: string) => {
+    return [
+      {
+        id: 'q1',
+        type: 'mcq' as const,
+        prompt: `In real-world production environments using ${skill}, what is the primary architectural trade-off to consider?`,
+        options: [
+          'Execution time complexity vs memory overhead',
+          'Code formatting vs compiler optimization',
+          'Table row limits vs network bandwidth',
+          'CPU core count vs thermal power draw'
+        ],
+        correctIndex: 0,
+        explanation: 'Engineering design in production balances time efficiency against memory usage and algorithmic bounds.'
+      },
+      {
+        id: 'q2',
+        type: 'coding' as const,
+        prompt: `Write or debug a concise, production-ready code snippet or query for ${skill} handling edge cases and errors:`,
+        starterCode: `// Write optimal ${skill} logic\nfunction processTask(data) {\n  if (!data) return null;\n  // Implementation here\n}`,
+        expectedKeyElements: ['null check', 'performance', 'error handling']
+      },
+      {
+        id: 'q3',
+        type: 'scenario' as const,
+        prompt: `A critical system component relying on ${skill} encounters throughput degradation under peak load. How would you systematically diagnose and verify the resolution?`,
+        evaluationRubric: 'Looks for monitoring/APM profiling, bottleneck identification, targeted optimization, and regression testing.'
+      }
+    ];
+  };
+
   // Load or generate quiz
   const loadQuiz = async (skillToLoad: string, topicToLoad?: string) => {
     setAiStatus('loading');
@@ -62,23 +93,36 @@ export const PracticeProve: React.FC = () => {
     setCurrentIdx(0);
 
     try {
-      const res = await fetch('/api/generate-prove-quiz', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          skillName: skillToLoad,
-          topic: topicToLoad || skillToLoad,
-          currentDemonstrated: userSkills.find((s) => s.skillName === skillToLoad)?.demonstratedScore || 2.5,
-        }),
-      });
+      let qData: any[] = [];
+      try {
+        const res = await fetch('/api/generate-prove-quiz', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            skillName: skillToLoad,
+            topic: topicToLoad || skillToLoad,
+            currentDemonstrated: userSkills.find((s) => s.skillName === skillToLoad)?.demonstratedScore || 2.5,
+          }),
+        });
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setQuestions(data.questions || []);
+        if (res.ok) {
+          const data = await res.json();
+          qData = data.questions || [];
+        }
+      } catch (fErr) {
+        console.warn('Prove quiz API fetch warning, using client fallback:', fErr);
+      }
+
+      if (!qData || qData.length === 0) {
+        qData = generateClientFallbackQuiz(skillToLoad);
+      }
+
+      setQuestions(qData);
       setAiStatus('idle');
     } catch (err: any) {
       console.error('Quiz load error:', err);
-      setAiStatus('error');
+      setQuestions(generateClientFallbackQuiz(skillToLoad));
+      setAiStatus('idle');
     }
   };
 
