@@ -148,6 +148,7 @@ export interface InterviewTurn {
   targetedSkill: string;
   feedback?: string;
   turnScore?: number;
+  verificationStatus?: 'VERIFIED_CORRECT' | 'PARTIALLY_CORRECT' | 'EXPLANATION_PROVIDED' | 'INCORRECT';
 }
 
 export interface InterviewSession {

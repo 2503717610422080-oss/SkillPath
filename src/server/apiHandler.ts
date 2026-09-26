@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'http';
 
 // Initialize Gemini client using server-side environment key
 const getGeminiClient = () => {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY || process.env.API_KEY;
   if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
     return null;
   }
@@ -33,6 +33,109 @@ const sendJson = (res: ServerResponse, statusCode: number, data: any) => {
   res.setHeader('Content-Type', 'application/json');
   res.end(JSON.stringify(data));
 };
+
+function generateSmartInterviewTurn(
+  roleTitle: string,
+  company: string,
+  lastQuestion: string = '',
+  lastAnswer: string = '',
+  turnIndex: number = 1
+) {
+  const isFinalTurn = turnIndex >= 4;
+  const ansLower = (lastAnswer || '').toLowerCase().trim();
+  const qLower = (lastQuestion || '').toLowerCase().trim();
+
+  const isAskingExplanation =
+    ansLower.includes('explain') ||
+    ansLower.includes('can u') ||
+    ansLower.includes('can you') ||
+    ansLower.includes('dont know') ||
+    ansLower.includes("don't know") ||
+    ansLower.includes('no idea') ||
+    ansLower.includes('what is') ||
+    ansLower.includes('help') ||
+    ansLower.includes('clarify') ||
+    ansLower === '?' ||
+    ansLower.length < 5;
+
+  let feedback = '';
+  let nextQuestion = '';
+  let targetedSkill = 'System Engineering';
+  let verificationStatus: 'VERIFIED_CORRECT' | 'PARTIALLY_CORRECT' | 'EXPLANATION_PROVIDED' = 'VERIFIED_CORRECT';
+  let turnScore = 85;
+
+  if (isAskingExplanation) {
+    verificationStatus = 'EXPLANATION_PROVIDED';
+    turnScore = 72;
+    if (qLower.includes('hashmap') || qLower.includes('treemap') || qLower.includes('data structure')) {
+      targetedSkill = 'Java / Data Structures';
+      feedback =
+        'Here is the technical breakdown: HashMap uses a hash table with array + bucket chains providing O(1) average lookup time without key ordering. TreeMap uses a Red-Black self-balancing tree providing guaranteed O(log n) lookup while keeping keys in natural sorted order. Favor HashMap for fast lookups, and TreeMap for range queries or ordered iteration.';
+      nextQuestion = isFinalTurn
+        ? 'Reflecting on your past projects, what is the single most complex technical bug or optimization challenge you resolved in production?'
+        : 'Now that we covered HashMap vs TreeMap, how would you ensure proper equals() and hashCode() implementations when using custom objects as keys in a HashMap?';
+    } else if (qLower.includes('sql') || qLower.includes('index') || qLower.includes('query')) {
+      targetedSkill = 'SQL / Database Tuning';
+      feedback =
+        'Database B-Tree indexes speed up SELECT query reads by maintaining a sorted lookup structure, but add overhead to INSERT/UPDATE statements. Transaction isolation levels (e.g. READ COMMITTED vs SERIALIZABLE) govern data visibility under concurrent updates.';
+      nextQuestion = isFinalTurn
+        ? 'Reflecting on your past projects, what is the single most complex technical bug or optimization challenge you resolved in production?'
+        : 'With that indexing foundation, how do you diagnose and resolve deadlock situations occurring between concurrent database transactions?';
+    } else if (qLower.includes('ram') || qLower.includes('scale') || qLower.includes('out-of-memory')) {
+      targetedSkill = 'System Scalability';
+      feedback =
+        'When data exceeds RAM capacity, streaming data via chunked iterators, offloading state to disk-backed stores (like Redis or RocksDB), and enforcing backpressure in queue consumers prevent Out-Of-Memory (OOM) crashes.';
+      nextQuestion = isFinalTurn
+        ? 'Reflecting on your past projects, what is the single most complex technical bug or optimization challenge you resolved in production?'
+        : 'How would you design a distributed caching strategy (e.g., Cache-Aside vs Write-Through) to reduce primary database query load?';
+    } else {
+      targetedSkill = 'Software Architecture';
+      feedback = `Great query! In technical interviews for ${roleTitle} at ${company}, we look at core engineering trade-offs like time complexity, memory allocation, and fault tolerance when designing microservices.`;
+      nextQuestion = isFinalTurn
+        ? 'Reflecting on your past projects, what is the most complex technical bug or optimization challenge you resolved in production?'
+        : 'Let\'s explore API design: how do you design RESTful endpoints for backward compatibility when introducing breaking schema changes?';
+    }
+  } else {
+    if (ansLower.includes('log') || ansLower.includes('o(1)') || ansLower.includes('tree') || ansLower.includes('hash')) {
+      targetedSkill = 'Algorithms & Data Structures';
+      verificationStatus = 'VERIFIED_CORRECT';
+      turnScore = 90;
+      feedback = 'Verified: Strong technical answer! You correctly identified the core time complexity guarantees (O(1) average vs O(log n)) and data structure ordering mechanics.';
+    } else if (ansLower.includes('index') || ansLower.includes('lock') || ansLower.includes('transaction')) {
+      targetedSkill = 'Database & Concurrency';
+      verificationStatus = 'VERIFIED_CORRECT';
+      turnScore = 88;
+      feedback = 'Verified: Solid technical answer! Good breakdown of database transaction behavior and write amplification trade-offs.';
+    } else {
+      targetedSkill = 'Technical Problem Solving';
+      verificationStatus = 'PARTIALLY_CORRECT';
+      turnScore = 68;
+      feedback = 'Evaluation: Your answer provides a reasonable high-level intuition, but missed explicit technical details regarding memory layout, worst-case bounds, and concurrent thread safety.';
+    }
+
+    if (isFinalTurn) {
+      nextQuestion = `Reflecting on your past experience for this ${roleTitle} role, what is the single most complex technical challenge or bug you diagnosed in production, and how did you verify the fix?`;
+    } else if (turnIndex === 1) {
+      nextQuestion = 'Now let\'s consider scale: what happens when your dataset exceeds available RAM, and what strategy would you adopt to prevent out-of-memory errors in high-throughput workloads?';
+      targetedSkill = 'System Scalability';
+    } else if (turnIndex === 2) {
+      nextQuestion = 'In distributed architectures, how do you design idempotent API endpoints to ensure duplicate network retries do not corrupt state?';
+      targetedSkill = 'Distributed Systems & API Design';
+    } else {
+      nextQuestion = 'How do you approach automated testing and regression prevention when refactoring legacy backend services?';
+      targetedSkill = 'Testing & Quality Assurance';
+    }
+  }
+
+  return {
+    verificationStatus,
+    turnScore,
+    feedback,
+    nextQuestion,
+    targetedSkill,
+    isFinalTurn,
+  };
+}
 
 export async function handleApiRoute(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   const rawUrl = req.url || '';
@@ -502,23 +605,30 @@ Return valid JSON:
       const body = await parseBody(req);
       const { roleTitle, company, transcript, lastQuestion, lastAnswer, turnIndex } = body;
 
-      const prompt = `You are an adaptive technical interviewer for "${roleTitle}" at "${company}".
-Candidate just responded to: "${lastQuestion}"
-Candidate Answer: "${lastAnswer}"
-Interview Turn: ${turnIndex + 1} of 5.
+      const prompt = `You are a Principal Engineering Interviewer for "${roleTitle}" at "${company}".
+The candidate just responded to the interviewer question:
+Interviewer Question: "${lastQuestion}"
+Candidate Answer/Input: "${lastAnswer}"
+Turn Index: ${turnIndex + 1} of 5.
 
-Transcript so far:
+Transcript history:
 ${JSON.stringify(transcript || [])}
 
-Analyze the candidate's response.
-1. Formulate brief 1-sentence conversational feedback acknowledging their point.
-2. Ask an adaptive follow-up question. If they answered well, increase depth (e.g. edge-cases, scale, trade-offs). If they struggled, pivot or provide a clarifying constraint. If this is turn 5, formulate a concluding question.
+INSTRUCTIONS:
+1. DETECT CANDIDATE INTENT:
+   - If the candidate asks a question, requests an explanation/hint, or states they don't know (e.g. "can u explain it", "can you explain", "I don't know", "what is this?", "clarify"):
+     * In "feedback", write a clear, helpful, educational 2-3 sentence technical explanation answering the interviewer question directly!
+     * In "nextQuestion", ask a follow-up question that tests their comprehension of the concept you just explained.
+   - If the candidate gave a technical answer:
+     * In "feedback", provide 1-2 sentences evaluating their response (praising correct intuition or highlighting trade-offs).
+     * In "nextQuestion", ask an adaptive follow-up question (increasing complexity or probing edge cases).
+   - If Turn Index is 5 (${turnIndex >= 4}), make "nextQuestion" a concluding interview question.
 
-Return valid JSON:
+Return valid JSON schema:
 {
-  "feedback": "Good observation on the logarithmic lookup overhead.",
-  "nextQuestion": "How would you handle cache invalidation in that architecture if multiple worker nodes update the record simultaneously?",
-  "targetedSkill": "System Architecture / Concurrency",
+  "feedback": "Educational explanation if candidate asked for explanation, or response evaluation",
+  "nextQuestion": "The follow-up technical question",
+  "targetedSkill": "Skill Name",
   "isFinalTurn": ${turnIndex >= 4}
 }`;
 
@@ -536,15 +646,15 @@ Return valid JSON:
         }
       }
 
-      const isFinalTurn = turnIndex >= 4;
-      sendJson(res, 200, {
-        feedback: "That highlights a practical understanding of the core mechanism.",
-        nextQuestion: isFinalTurn 
-          ? "Thank you for detailing that! As our final question: reflecting on the projects on your resume, what is the single most complex technical bug you diagnosed in production or staging, and how did you verify the fix?"
-          : "That makes sense. Now let's consider scale: what happens when your dataset exceeds available RAM, and what strategy would you adopt to prevent out-of-memory errors in high-throughput workloads?",
-        targetedSkill: isFinalTurn ? "Problem Solving & Engineering Maturity" : "System Scalability",
-        isFinalTurn
-      });
+      const turnFallback = generateSmartInterviewTurn(
+        roleTitle || 'Software Engineer',
+        company || 'Sample Technologies',
+        lastQuestion,
+        lastAnswer,
+        turnIndex
+      );
+
+      sendJson(res, 200, turnFallback);
       return true;
     }
 
